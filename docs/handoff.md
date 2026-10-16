@@ -6,6 +6,16 @@
 
 ## 当前状态
 
+### 2026-10-16 最新源码同步与 Downloads 清理受阻
+
+用户后续明确要求先将本地最新实现 commit、push，再清理 Downloads 冗余文件。两套经典界面与1–10倍动画速度等26个文件已提交为 `c5adb9bd467c42c853698a6296a1671542ba1596`，推送到用户自己的 `wenhuorongbing-netizen/party-sanguosha` 的 `main`；`git ls-remote origin refs/heads/main` 与本机提交逐字一致。开发目录继续使用 `D:\Code\party-sanguosha`；公开启动包和标签仍为既有v0.7.13，没有创建新的发行版。下面的界面验收条目保留同步前的历史记录，本节为最新源码同步状态。
+
+本轮提交前重新执行完整检查：`npm --loglevel error run check` 退出0，类型、198项测试（0失败／跳过）、构建和格式通过，归档 `ba0a4eca0a67d9e5`；Edge完整回归34/34通过，输出 `.runtime/prepush-browser-20261016-1923-2/`，归档 `ab6f04a4ba885e3b`。源码发布检查 `npm run release:check` 通过，归档 `9c031897463c0b74`。此前完整检查遇到随机端口的 `fetch failed / bad port`（归档 `7028134fc7f8a522`），第一次浏览器回归遇到6667端口的 `ERR_UNSAFE_PORT`（归档 `c265ffe812468edb`）；失败发生在访问测试服务时，原始输出保留，未修改断言或系统端口设置，原样重跑后通过。桌面测试不替代手机／微信真机验收。
+
+Downloads旧启动目录共有7672个文件、745969446字节。逐文件核对确认6809个文件与开发目录SHA-256一致；819个依赖／构建文件可重新生成；其余44个不同或独有文件已原样保存到 `.local/downloads-preserved-20261016-1923/old-unique/`，包括旧运行日志、会话文件、便携运行环境与不同版本源码，逐个哈希通过。独立的65将审计JSON另保存一份，原件仍留在Downloads；共保存45份文件、146211126字节，全部忽略、不推送。旧ZIP的68247068字节及SHA-256 `4a66dd273f521ce8e2a88106bc5d0584b0300cb36c675a04216a7ffc27483232` 与上游v0.7.13 GitHub发行附件一致。
+
+清理状态为 **BLOCKED**：远端提交核实后，针对旧目录的 `Remove-Item -LiteralPath ... -Recurse -Force -ErrorAction Stop` 被工具自动审批拒绝，返回 `rejected: blocked by policy`，进程未创建；没有改用其他工具绕过。旧目录和ZIP均仍存在，删除字节为0。当前D盘开发目录和3100端口服务保留；最终健康响应为ok=true、engineReady=false，不能将当前预览称为可开局，电脑规则执行端就绪仍待恢复，本轮没有重启服务。156个非目标Downloads条目的元数据未变，审计JSON原件哈希未变。逐文件清单和实际执行结果分别保存在 `.runtime/downloads-cleanup-20261016-1923/manifest.json` 与 `postcheck.json`；执行结果以postcheck中实际两个删除目标和BLOCKED状态为准，审计JSON原件不属于执行删除范围。下一步仍为清理这两个已确认冗余的旧包目标，需先解决工具对删除操作的策略限制。
+
 ### 2026-10-16 经典大厅、工具菜单与房主大厅调速
 
 同一专属 PO 对话已收到当前五份页面源码及实际手机尺寸截图，浏览器实际选中 GPT-6 Pro。完整12136字符的逐项审查已回收，原回复与页面截图保存在 `.runtime/po-classic-ui/2026-10-16T15-30-00/`；采用的十项策略写入既有 product.md。按照用户要求由图像子代理生成两张无文字场景背景，分别1672×941、68204／103096字节，通过构建 CSS 的 WebP data URL 接入；工具没有返回可核实的具体模型版本，不冒称验证了 GPT Image 2.5。
