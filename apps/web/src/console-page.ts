@@ -1,6 +1,8 @@
 import {
   findMode,
   GENERAL_PRESETS,
+  ANIMATION_SPEEDS,
+  DEFAULT_ANIMATION_SPEED,
   type ConsoleInfo,
   type ConsoleRoom,
   type ServerInfo,
@@ -25,8 +27,8 @@ export function showServerPage(info: ServerInfo): void {
   frame(
     'server-layout console-layout',
     '本机服务控制台',
-    '一扫入席。<br /><span>好戏开场。</span>',
-    '把入口分享给朋友，余下的交给这一桌。<br />玩家在自己的手机上建房、准备和开局。',
+    '聚会<span>服务台</span>',
+    '保持本页开启，朋友在自己的设备上入席、准备和开局。',
     `
     <section class="console-stats" aria-label="服务概况">
       <div><span>房间</span><strong id="room-total">0 间</strong></div>
@@ -39,14 +41,47 @@ export function showServerPage(info: ServerInfo): void {
     <section class="panel console-rooms"><div class="panel-heading"><h2>全部房间</h2><span class="tag muted">仅本机管理</span></div><ul id="room-list" class="room-list"></ul><p id="empty-rooms" class="empty-rooms">还没有牌桌。朋友扫码后即可创建房间。</p><p id="console-status" class="hint" role="status"></p></section></div>
     <p class="hint">两种入口的朋友可以加入同一间房。整局保持电脑开机、页面开启，并避免休眠；跨网络玩家还需要电脑联网。结束后双击「停止聚会三国杀」。</p>
     <section id="console-room" class="panel console-room" hidden><div class="panel-heading"><div><p class="eyebrow">房间详情与观战</p><h2 id="console-room-title"></h2></div><span id="console-room-phase" class="tag"></span></div><p id="console-room-settings" class="hint"></p><div id="console-players" class="console-players"></div><div id="console-actions" class="console-actions"></div><p class="hint">公开观战只显示已亮出的身份、体力、手牌数量、装备和公开动作。</p><div id="observer-view"></div></section>`,
-    '<div class="console-hero-note"><span class="hero-note-line"></span><p>两种网络<br /><strong>同一张桌</strong></p><small>同 Wi-Fi / 手机流量<br />都能相聚于此</small></div>',
   );
+  const workspace = document.createElement('div');
+  workspace.className = 'console-workspace';
+  workspace.classList.toggle('has-internet', internet);
+  element('.console-grid').before(workspace);
+  workspace.append(element('.console-grid'), element('#console-room'));
   let rooms: ConsoleRoom[] = [];
   let selected = '';
   let checking = false;
   let refreshing = false;
   let stopped = false;
   let lastRooms = '';
+  let speedSaving = false;
+  element('#console-room-settings').insertAdjacentHTML(
+    'afterend',
+    `<div id="console-speed-control" hidden><label for="console-animation-speed">本房动画速度<select id="console-animation-speed">${ANIMATION_SPEEDS.map((speed) => `<option value="${speed}">${speed} 倍${speed === 2 ? '（默认）' : speed === 1 ? '（原速）' : ''}</option>`).join('')}</select></label><p class="hint">立即同步给本房所有玩家；可以在对局中调整，思考时间不变。</p></div>`,
+  );
+  const speedControl = element<HTMLSelectElement>('#console-animation-speed');
+  speedControl.addEventListener('change', async () => {
+    const entry = rooms.find((entry) => entry.room.code === selected);
+    if (!entry || speedSaving) return;
+    const animationSpeed = Number(speedControl.value);
+    speedSaving = true;
+    speedControl.disabled = true;
+    try {
+      await api(
+        `/api/console/rooms/${entry.room.code}/animation-speed`,
+        'PUT',
+        { animationSpeed },
+        { 'X-Party-Revision': String(entry.room.revision) },
+      );
+      message(`本房动画已设为 ${animationSpeed} 倍。`, true);
+    } catch (cause) {
+      message(cause instanceof Error ? cause.message : '动画速度保存失败，请重试。');
+    } finally {
+      speedSaving = false;
+      lastRooms = '';
+      await refresh();
+      renderDetail();
+    }
+  });
   function renderEntry(updated: ServerInfo) {
     element('#entry-status').textContent = updated.entry.message;
     bindQr(
@@ -89,6 +124,10 @@ export function showServerPage(info: ServerInfo): void {
     element('#console-room').hidden = !entry;
     if (!entry) return;
     const { room } = entry;
+    element('#console-speed-control').hidden = !room.engine.animationSpeed;
+    speedControl.disabled = speedSaving;
+    if (!speedSaving)
+      speedControl.value = String(room.settings.animationSpeed ?? DEFAULT_ANIMATION_SPEED);
     const owner = room.players.find((player) => player.id === room.ownerId);
     element('#console-room-title').textContent =
       `${owner?.nickname ?? '朋友'}的房间 · ${room.code}`;
@@ -177,7 +216,8 @@ export function showServerPage(info: ServerInfo): void {
       view.addEventListener('click', () => {
         selected = room.code;
         render();
-        element('#console-room').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        if (matchMedia('(max-width: 1100px)').matches)
+          element('#console-room').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       });
       item.append(details, view);
       list.append(item);
@@ -195,7 +235,8 @@ export function showServerPage(info: ServerInfo): void {
         lastRooms = key;
         render();
       }
-      element('#console-status').textContent = '房间状态自动更新 · 管理操作需要确认';
+      element('#console-status').textContent =
+        '房间状态自动更新 · 结束对局、移除席位和关闭房间需要确认';
     } catch (error) {
       element('#console-status').textContent =
         error instanceof Error ? error.message : '控制台暂时无法连接';

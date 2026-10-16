@@ -18,6 +18,8 @@
 
 ## 大厅依赖
 
+2026-10-16 新增的 `apps/web/src/assets/classic-war-camp.webp` 与 `classic-ink-scroll.webp` 是本任务通过内置 `image_gen` 生成的原创无文字场景，再由 sharp 编码为 WebP；分别用于「铜雀军帐」和「宣纸墨局」背景。未复制官方三国杀界面截图、标志或商业素材。工具未返回可核实的具体模型版本，因此不将用户要求的“GPT Image 2.5”记作已验证模型。概念图仅供布局参考，未作为实际交互界面。
+
 `qrcode` 用于本机生成二维码。其原始许可证随 `node_modules/qrcode` 保留，版本和可复现依赖记录在 `package-lock.json`。其他开发工具版本见 `package.json` 和锁文件。
 
 `ws` 8.22.0 用于正式认证 WebSocket 和独立验证，MIT 许可证保留。Windows 打包收集实际进入服务端 bundle 的 npm 包许可证到 `notices/npm`，另保留 qrcode、ws 许可证副本。

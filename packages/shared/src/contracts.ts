@@ -6,6 +6,8 @@ export const APP_ID = 'party-sanguosha';
 export const APP_VERSION = '0.7.13';
 export const OWNER_OFFLINE_GRACE_MS = 60000;
 export const ROOM_IDLE_GRACE_MS = 10 * 60000;
+export const DEFAULT_ANIMATION_SPEED = 2;
+export const ANIMATION_SPEEDS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as const;
 
 export const MODES = [
   {
@@ -52,6 +54,8 @@ export interface RoomSettings {
   playerCount: number;
   generalPreset: GeneralPresetId;
   allowGeneralSelection: boolean;
+  /** Presentation multiplier; absent only in older server snapshots. */
+  animationSpeed?: number;
   extensions: string[];
 }
 
@@ -91,6 +95,7 @@ export interface EngineStatus {
   playerHistory?: boolean;
   experience?: boolean;
   publicSpectating?: boolean;
+  animationSpeed?: boolean;
 }
 
 /** Explicit consent only; identity votes do not contain roles or factions. */

@@ -301,6 +301,7 @@ try {
   };
   progress('filesystem', '正在检查本地游戏资源…');
   await browserReady({ lib, game, get, ui, ai, _status });
+  if (setup.animationSpeedControl) (await import('./animation-speed.js')).installAnimationSpeed();
   lib.buildInfo = await loadBuildInfo();
   installPrivacy();
   installControls();

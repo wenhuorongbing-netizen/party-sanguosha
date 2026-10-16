@@ -2,6 +2,8 @@ import { api, connection } from './ui.js';
 import { createLanHost } from './lan-host.js';
 import type { LanOffer } from './lan-peer.js';
 
+type EngineJob = { id: string; roomCode: string; views?: string[]; animationSpeed?: number };
+
 /** Local-only job discovery grants no player or room-owner capability. */
 export function startEngineSupervisor(): void {
   if (navigator.locks) {
@@ -30,8 +32,25 @@ function runSupervisor(): void {
   const lan = createLanHost();
   const frames = new Map<string, HTMLIFrameElement>();
   const retryAt = new Map<string, number>();
+  const speeds = new Map<string, number>();
+  function syncSpeed(key: string, frame: HTMLIFrameElement): void {
+    const matchId = key.split('/')[0]!;
+    const animationSpeed = speeds.get(matchId);
+    if (animationSpeed !== undefined)
+      frame.contentWindow?.postMessage(
+        { type: 'party-animation-speed', matchId, animationSpeed },
+        location.origin,
+      );
+  }
   window.addEventListener('message', (event) => {
-    if (event.origin !== location.origin || event.data?.type !== 'party-view-failed') return;
+    if (event.origin !== location.origin) return;
+    if (event.data?.type === 'party-animation-ready') {
+      for (const [key, frame] of frames)
+        if (event.source === frame.contentWindow && key.split('/')[0] === event.data.matchId)
+          syncSpeed(key, frame);
+      return;
+    }
+    if (event.data?.type !== 'party-view-failed') return;
     for (const [key, frame] of frames) {
       if (
         !frame.classList.contains('engine-seat-view') ||
@@ -47,7 +66,10 @@ function runSupervisor(): void {
     }
   });
   let running = false;
-  function render(jobs: { id: string; roomCode: string; views?: string[] }[]): void {
+  function render(jobs: EngineJob[]): void {
+    speeds.clear();
+    for (const job of jobs)
+      if (job.animationSpeed !== undefined) speeds.set(job.id, job.animationSpeed);
     const active = new Set(
       jobs.flatMap((job) => [job.id, ...(job.views ?? []).map((seat) => `${job.id}/${seat}`)]),
     );
@@ -59,7 +81,10 @@ function runSupervisor(): void {
     for (const job of jobs) {
       for (const seat of [null, ...(job.views ?? [])]) {
         const key = seat ? `${job.id}/${seat}` : job.id;
-        if (frames.has(key)) continue;
+        if (frames.has(key)) {
+          syncSpeed(key, frames.get(key)!);
+          continue;
+        }
         const frame = document.createElement('iframe');
         frame.className = seat ? 'engine-worker engine-seat-view' : 'engine-worker';
         frame.title = `房间 ${job.roomCode} 的${seat ? '玩家视图' : '对局服务'}`;
@@ -67,6 +92,7 @@ function runSupervisor(): void {
           ? `/engine/view/${job.id}?seat=${encodeURIComponent(seat)}`
           : `/engine/worker/${job.id}`;
         frame.setAttribute('aria-hidden', 'true');
+        frame.addEventListener('load', () => syncSpeed(key, frame));
         document.body.append(frame);
         frames.set(key, frame);
       }
@@ -78,7 +104,7 @@ function runSupervisor(): void {
     running = true;
     try {
       const { jobs, lanOffers } = await api<{
-        jobs: { id: string; roomCode: string; views?: string[] }[];
+        jobs: EngineJob[];
         lanOffers?: LanOffer[];
       }>('/engine/jobs');
       render(jobs);

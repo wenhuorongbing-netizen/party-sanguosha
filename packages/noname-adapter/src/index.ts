@@ -18,6 +18,7 @@ export interface EngineAdapter {
   matchId?(roomCode: string): string | null;
   subscribe?(listener: (event: EngineEvent) => void): () => void;
   release?(roomCode: string): void;
+  setAnimationSpeed?(roomCode: string, speed: number): void;
 }
 
 export type EngineEvent =

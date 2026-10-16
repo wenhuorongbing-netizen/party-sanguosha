@@ -6,6 +6,7 @@ import {
   GENERAL_PRESETS,
   OWNER_OFFLINE_GRACE_MS,
   ROOM_IDLE_GRACE_MS,
+  DEFAULT_ANIMATION_SPEED,
   type ExtensionInfo,
   type GeneralPresetId,
   type GeneralChoiceView,
@@ -43,6 +44,7 @@ export class RoomStore {
     playerCount: 5,
     generalPreset: 'beginner',
     allowGeneralSelection: false,
+    animationSpeed: DEFAULT_ANIMATION_SPEED,
     extensions: [],
   };
   private ownerId: string | null = null;
@@ -314,6 +316,7 @@ export class RoomStore {
       generalPreset: body.generalPreset as GeneralPresetId,
       allowGeneralSelection:
         (body.allowGeneralSelection as boolean | undefined) ?? this.settings.allowGeneralSelection,
+      animationSpeed: this.settings.animationSpeed ?? DEFAULT_ANIMATION_SPEED,
       extensions,
     };
     if (JSON.stringify(next) === JSON.stringify(this.settings)) return;
@@ -327,6 +330,29 @@ export class RoomStore {
       if (bot.kind === 'bot') this.players.delete(bot.id);
     }
     this.resetReady();
+    this.changed();
+  }
+
+  setAnimationSpeed(value: unknown, ownerToken?: string): void {
+    this.requireOwner(ownerToken);
+    if (this.phase !== 'waiting')
+      throw new AppError(409, 'ROOM_LOCKED', '请在等待大厅修改动画速度。');
+    this.updateAnimationSpeed(value);
+  }
+
+  /** Separate local operator authority; never grants a player-owner session. */
+  consoleSetAnimationSpeed(value: unknown): void {
+    this.updateAnimationSpeed(value);
+  }
+
+  private updateAnimationSpeed(value: unknown): void {
+    if (this.phase === 'closed') throw new AppError(409, 'ROOM_CLOSED', '房间已关闭。');
+    if (!Number.isInteger(value) || (value as number) < 1 || (value as number) > 10)
+      throw new AppError(400, 'INVALID_ANIMATION_SPEED', '动画速度需要是 1–10 倍的整数。');
+    if (value === this.settings.animationSpeed) return;
+    this.settings.animationSpeed = value as number;
+    this.engine.setAnimationSpeed?.(this.code, value as number);
+    // Cosmetic changes retain seats, ready flags, pending choices and deadlines.
     this.changed();
   }
 

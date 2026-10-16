@@ -143,7 +143,9 @@ export function installEmotions() {
     }
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const destination = `translate(${tx - x}px,${ty - y}px)`;
-    const duration = reduced ? 140 : 850;
+    const milliseconds = (value) =>
+      globalThis.partyEngine.animationSpeed?.milliseconds(value) ?? value;
+    const duration = milliseconds(reduced ? 140 : 850);
     // Use the browser API directly: native divs can install their own animate
     // method. An explicit middle frame also makes the flight visible on desktop.
     const animate = Element.prototype.animate;
@@ -172,12 +174,12 @@ export function installEmotions() {
         animate.call(
           node.firstElementChild,
           [{ transform: 'scale(1)' }, { transform: 'scale(1.3)' }, { transform: 'scale(1)' }],
-          { duration: 300 },
+          { duration: milliseconds(300) },
         );
       setTimeout(() => {
         node.remove();
         nodes.delete(node);
-      }, 1000);
+      }, milliseconds(1000));
     }, duration);
   };
   if (globalThis.partyEngine.setup.role === 'worker') {

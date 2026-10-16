@@ -274,6 +274,7 @@ export class NativeNonameService implements EngineAdapter {
       playerHistory: true,
       publicSpectating: true,
       experience: true,
+      animationSpeed: true,
       message: ready
         ? '无名杀已就绪，真人准备后可以开始对局。'
         : assets
@@ -292,7 +293,12 @@ export class NativeNonameService implements EngineAdapter {
   private jobs() {
     return [...this.matches.values()]
       .filter((match) => ['starting', 'playing', 'ended'].includes(match.state))
-      .map(({ id, setup, views }) => ({ id, roomCode: setup.roomCode, views: [...views] }));
+      .map(({ id, setup, views }) => ({
+        id,
+        roomCode: setup.roomCode,
+        views: [...views],
+        animationSpeed: setup.settings.animationSpeed,
+      }));
   }
   private publishJobs() {
     for (const stream of this.jobStreams) stream.publish();
@@ -301,6 +307,12 @@ export class NativeNonameService implements EngineAdapter {
     return (
       [...this.matches.values()].find((match) => match.setup.roomCode === roomCode)?.id ?? null
     );
+  }
+  setAnimationSpeed(roomCode: string, speed: number): void {
+    const match = [...this.matches.values()].find((match) => match.setup.roomCode === roomCode);
+    if (!match) return;
+    match.setup.settings.animationSpeed = speed;
+    this.publishJobs();
   }
   start(setup: MatchSetup): Promise<void> {
     const presets = JSON.parse(
@@ -1350,6 +1362,7 @@ export class NativeNonameService implements EngineAdapter {
             ruleClock: worker,
             ruleRecovery: worker,
             tablePresentation: true,
+            animationSpeedControl: true,
             ...match.setup,
             generalSelections: worker ? match.setup.generalSelections : undefined,
             role: worker ? 'worker' : 'player',
@@ -1440,6 +1453,7 @@ export class NativeNonameService implements EngineAdapter {
         if (
           ![
             'bootstrap.js',
+            'animation-speed.js',
             'mode.js',
             'roster-policy.js',
             'card-pile.js',

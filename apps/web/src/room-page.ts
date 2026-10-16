@@ -2,6 +2,8 @@ import {
   GENERAL_PRESETS,
   MATCH_FAILURE_MESSAGES,
   MODES,
+  ANIMATION_SPEEDS,
+  DEFAULT_ANIMATION_SPEED,
   findMode,
   matchStartTimeout,
   type GeneralChoiceView,
@@ -29,7 +31,8 @@ import { bindQr, qrMarkup } from './qr.js';
 import { bindGeneralGuide, guideButton } from './general-guide.js';
 import { createAssetPreloader } from './engine-preloader.js';
 import { createLanConnection } from './lan-client.js';
-import { modeIcon, roomArtwork } from './lobby-art.js';
+import { modeIcon } from './lobby-art.js';
+import { bindClassicToolbar } from './classic-ui.js';
 import { renderRosterSource } from './roster-source.js';
 import { bindSurrenderDialog } from './surrender-dialog.js';
 import { bindMatchRecords } from './match-records.js';
@@ -66,6 +69,7 @@ export function showRoomPage(initial: RoomInfo, initialSession: SessionView): vo
   let pendingReturnMatchId: string | null = null;
   let returning = false;
   let recoveringRules = false;
+  let speedSaving = false;
   // Native is the product client, including while an older service is running.
   // Keep the former client reachable only for explicit regression fixtures.
   const lightweight = sessionStorage.getItem('party_lightweight_verification') === '1';
@@ -96,26 +100,61 @@ export function showRoomPage(initial: RoomInfo, initialSession: SessionView): vo
 
   frame(
     'room-layout',
-    '朋友已经在等你',
-    '好戏，等你入席。',
-    '准备好，就一起开场。每位入座的朋友都可以分享房间邀请。',
+    '房间等候厅',
+    '群英<span>入席</span>',
+    '确认本局规则，准备后由房主开局。',
     `
     <section id="match-panel" class="match-panel" hidden><div class="match-toolbar"><strong id="match-label">正在选将</strong><span id="orientation-hint" class="orientation-hint" hidden>请横着握手机</span><button id="match-orientation" class="button secondary" type="button" hidden>竖屏显示</button><button id="match-sound" class="button secondary" type="button" aria-pressed="false">开启声音</button><label class="match-volume" for="match-volume">音量<input id="match-volume" type="range" min="0" max="100" step="5" value="35" aria-label="声音音量"><output id="match-volume-value" for="match-volume">35%</output></label><button id="match-share" class="button secondary" type="button">房间二维码</button><button id="rematch-button" class="button primary" type="button" hidden>回到房间，准备下一局</button><span id="finished-hint" hidden>请等房主返回房间</span></div><div id="game-frame-container"><div id="game-frame-mount"></div><div id="match-loading" class="match-loading" role="status" aria-live="polite" hidden><strong id="match-loading-status">正在准备对局…</strong><progress id="match-loading-progress" max="6" value="0" aria-label="对局载入步骤"></progress><p id="match-loading-detail">第 1 / 6 步 · 首次进入需要载入游戏资源</p></div></div></section>
     <div class="room-grid">
-      <section class="panel welcome-panel"><div class="panel-heading"><h2>这一桌</h2><span class="tag" id="player-room-code"></span></div><div class="game-summary"><span id="summary-mode" class="summary-mode"></span><span id="summary-details"></span></div><p id="summary-preset" class="hint"></p>${guideButton}
+      <section class="panel welcome-panel"><div class="panel-heading"><h2>我的席位</h2><span class="tag" id="player-room-code"></span></div>
         <div id="other-room" class="message" hidden>你已经在另一间房，请先回去离开。<a id="other-room-link" href="/">返回原房间</a></div>
         <form id="join-form"><label for="nickname">怎么称呼你</label><input id="nickname" name="nickname" placeholder="输入昵称，朋友才认得你" autocomplete="nickname" maxlength="32" required /><p class="hint">昵称 1–16 个字，无需注册账号。</p><button id="join-button" class="button primary full-width" type="submit">入座</button></form>
-        <div id="my-seat" hidden><p class="my-seat-label" id="my-role"></p><h3 id="my-nickname"></h3><button id="ready-button" class="button primary full-width" type="button">我准备好了</button><button id="share-button" class="button secondary full-width" type="button">展示房间二维码</button><div id="owner-start" hidden><button id="start-button" class="button primary full-width" type="button" disabled>开始对局</button></div><button id="leave-button" class="button text-button full-width" type="button">离开房间</button><p id="owner-leave-hint" class="hint" hidden>离开后房主交接给下一位真人；最后一位真人离开会关闭房间。</p></div>
+        <div id="my-seat" hidden><p class="my-seat-label" id="my-role"></p><h3 id="my-nickname"></h3><section id="start-check" class="start-check" aria-label="开局检查" role="status"><strong id="start-check-title"></strong><ul id="start-blockers"></ul></section><div class="room-primary"><button id="ready-button" class="button primary full-width" type="button">我准备好了</button><div id="owner-start" hidden><button id="start-button" class="button secondary full-width" type="button" disabled>开始对局</button></div></div><div class="room-secondary"><button id="share-button" class="button secondary" type="button">展示房间二维码</button><button id="leave-button" class="button text-button" type="button">离开房间</button></div><p id="owner-leave-hint" class="hint" hidden>离开后交接房主；最后一位真人离开会关闭房间。</p></div>
+        <details id="room-rules-summary" class="room-rules-summary"><summary><span id="summary-mode" class="summary-mode"></span><span id="summary-details"></span><span class="rules-expand">查看规则</span></summary><div class="room-rules-body"><p id="summary-preset" class="hint"></p>${guideButton}</div></details>
       </section>
-      <section class="panel players-panel"><div class="panel-heading"><h2>等朋友到齐</h2><span id="player-counter" class="tag muted"></span></div><p id="seat-count" class="hint seat-count"></p><div id="bot-controls" class="bot-controls" hidden><button id="add-bot" class="button secondary" type="button">添加 1 个 AI</button><button id="fill-bots" class="button subtle" type="button">用 AI 补满空位</button><p class="hint">AI 自动准备，使用无名杀完整原生决策。</p></div><ul id="players" class="players"></ul><p id="waiting-text" class="waiting-text"></p><p id="owner-status" class="hint"></p><p id="engine-status" class="hint engine-status"></p></section>
-      <details id="settings-panel" class="panel settings-panel" hidden><summary><span>房主设置</span><small>玩法 · 武将 · 扩展</small></summary><div class="settings-body"><div class="mode-grid">${MODES.map((mode) => `<button type="button" class="mode-card" data-mode="${mode.id}" aria-pressed="false"><span class="mode-mark">${modeIcon(mode.id)}</span><strong>${mode.name}</strong><small>${mode.minPlayers === mode.maxPlayers ? mode.minPlayers : '5–8'} 席</small></button>`).join('')}</div><p id="mode-description" class="mode-description"></p><div class="field-row"><label for="player-count">总席位（含 AI）<select id="player-count"></select></label><label for="general-preset">武将范围<select id="general-preset">${GENERAL_PRESETS.map((preset) => `<option value="${preset.id}">${preset.name}</option>`).join('')}</select></label></div><p id="preset-description" class="hint"></p><div class="extensions"><h3>扩展包</h3><p class="hint">暂无已接入的扩展包</p></div><button id="save-settings" class="button secondary full-width" type="button" hidden>重试保存</button><p id="settings-state" class="hint" role="status" aria-live="polite"></p></div></details>
+      <section class="panel players-panel"><div class="panel-heading"><div><p class="section-index">虚位以待 · 共聚一堂</p><h2>本桌席位</h2></div><span id="player-counter" class="tag muted"></span></div><p id="seat-count" class="hint seat-count"></p><ul id="players" class="players"></ul><div id="bot-controls" class="bot-controls" hidden><button id="add-bot" class="button secondary" type="button">添加 1 个 AI</button><button id="fill-bots" class="button subtle" type="button">用 AI 补满空位</button></div><p id="waiting-text" class="waiting-text"></p><details class="room-service-details"><summary>房主与连接状态</summary><p id="owner-status" class="hint"></p><p id="engine-status" class="hint engine-status"></p></details></section>
+      <details id="settings-panel" class="panel settings-panel" hidden><summary><span>房主设置</span><small>玩法 · 武将 · 动画</small></summary><div class="settings-body"><section id="tempo-settings" class="settings-group"><h3>动画与节奏</h3></section><section class="settings-group"><h3>开局规则</h3><div class="mode-grid">${MODES.map((mode) => `<button type="button" class="mode-card" data-mode="${mode.id}" aria-pressed="false"><span class="mode-mark">${modeIcon(mode.id)}</span><strong>${mode.name}</strong><small>${mode.minPlayers === mode.maxPlayers ? mode.minPlayers : '5–8'} 席</small></button>`).join('')}</div><p id="mode-description" class="mode-description"></p><label for="player-count">总席位（含 AI）<select id="player-count"></select></label></section><section class="settings-group"><h3>武将与点将</h3><label for="general-preset">武将范围<select id="general-preset">${GENERAL_PRESETS.map((preset) => `<option value="${preset.id}">${preset.name}</option>`).join('')}</select></label><p id="preset-description" class="hint"></p></section><button id="save-settings" class="button secondary full-width" type="button" hidden>重试保存</button><p id="settings-state" class="hint" role="status" aria-live="polite"></p></div></details>
     </div>
     <dialog id="share-dialog" aria-labelledby="share-title"><div class="panel-heading"><h2 id="share-title">扫码直接进入本房间</h2><button id="close-share" class="close-dialog" type="button" aria-label="关闭房间二维码">×</button></div><p class="room-code">房间 <strong>${room.code}</strong></p>${qrMarkup('本房间邀请二维码', '微信扫一扫 · 直接进入这张牌桌')}</dialog>`,
-    roomArtwork,
   );
   const surrender = bindSurrenderDialog(() => room.settings.mode);
+  element('#room-rules-summary').insertAdjacentHTML(
+    'beforebegin',
+    '<button id="room-settings-link" class="button secondary full-width room-settings-link" type="button" hidden>房主设置 · 动画与规则</button>',
+  );
+  element('#room-settings-link').addEventListener('click', () => {
+    const panel = element<HTMLDetailsElement>('#settings-panel');
+    panel.open = true;
+    panel.scrollIntoView({ block: 'start' });
+    element<HTMLSelectElement>(
+      room.engine.animationSpeed ? '#room-animation-speed' : '#player-count',
+    ).focus({ preventScroll: true });
+  });
   const records = bindMatchRecords();
   const experience = bindMatchExperience();
+  const speedOptions = ANIMATION_SPEEDS.map(
+    (speed) =>
+      `<option value="${speed}">${speed} 倍${speed === 2 ? '（默认）' : speed === 1 ? '（原速）' : ''}</option>`,
+  ).join('');
+  element('#tempo-settings').insertAdjacentHTML(
+    'beforeend',
+    `<div id="room-speed-control"><label for="room-animation-speed">动画速度<select id="room-animation-speed">${speedOptions}</select></label><p class="hint">在等待大厅修改 · 全桌同步 · 思考时间不变</p></div>`,
+  );
+  element('#room-rules-summary').insertAdjacentHTML(
+    'afterend',
+    '<p id="summary-animation-speed" class="hint" hidden></p>',
+  );
+  function syncAnimationSpeed(): void {
+    if (!room.engine.animationSpeed) return;
+    document.querySelector<HTMLIFrameElement>('#game-frame')?.contentWindow?.postMessage(
+      {
+        type: 'party-animation-speed',
+        matchId: room.matchId,
+        animationSpeed: room.settings.animationSpeed ?? DEFAULT_ANIMATION_SPEED,
+      },
+      location.origin,
+    );
+  }
   const spectator = bindRoomSpectator(room.code);
   function updateMatchControls(): void {
     const connected =
@@ -133,6 +172,7 @@ export function showRoomPage(initial: RoomInfo, initialSession: SessionView): vo
       room.phase === 'playing' && connected,
       Boolean(room.engine.experience),
     );
+    toolbar.update(connected, room.phase === 'finished');
   }
   for (const [anchor, id] of [
     ['#preset-description', 'preset-source'],
@@ -146,7 +186,7 @@ export function showRoomPage(initial: RoomInfo, initialSession: SessionView): vo
     'afterend',
     '<label class="general-selection-setting"><input id="allow-general-selection" type="checkbox" />允许点将</label><p id="general-selection-description" class="hint">开放后，真人可在大厅点一名武将作为第1个候选；同局上场武将不重复，开局仍需选将。</p>',
   );
-  element('#settings-panel summary small').textContent = '玩法 · 武将 · 点将 · 扩展';
+  element('#settings-panel summary small').textContent = '玩法 · 武将 · 点将 · 动画';
   element('#preset-description').insertAdjacentHTML(
     'afterend',
     '<p id="preset-deck" class="hint"></p>',
@@ -220,6 +260,7 @@ export function showRoomPage(initial: RoomInfo, initialSession: SessionView): vo
   restoreButton.textContent = '恢复牌桌';
   action(restoreButton, restoreGame);
   element('.match-toolbar').insertBefore(restoreButton, element('#match-share'));
+  const toolbar = bindClassicToolbar(app);
   const connectionNotice = document.createElement('section');
   connectionNotice.id = 'match-connection';
   connectionNotice.className = 'match-connection';
@@ -492,6 +533,7 @@ export function showRoomPage(initial: RoomInfo, initialSession: SessionView): vo
       if (!room.engine.connectionRecovery) confirmConnection();
       refresh();
     }
+    if (event.data.type === 'party-animation-ready') syncAnimationSpeed();
   });
   window.addEventListener(
     'pagehide',
@@ -642,6 +684,7 @@ export function showRoomPage(initial: RoomInfo, initialSession: SessionView): vo
       frame.allow = 'autoplay';
       frame.src = playerFrameUrl(room.matchId!);
       frame.addEventListener('load', () => {
+        syncAnimationSpeed();
         if (room.phase === 'finished' && !room.matchFailure)
           frame.contentWindow?.postMessage(
             { type: 'party-finished', matchId: room.matchId },
@@ -673,6 +716,16 @@ export function showRoomPage(initial: RoomInfo, initialSession: SessionView): vo
           location.origin,
         );
     updateMatchControls();
+    syncAnimationSpeed();
+    const speedSupported = Boolean(room.engine.animationSpeed);
+    const animationSpeed = room.settings.animationSpeed ?? DEFAULT_ANIMATION_SPEED;
+    element('#room-speed-control').hidden = !speedSupported || !isOwner || !waiting;
+    element('#summary-animation-speed').hidden = !speedSupported;
+    element('#summary-animation-speed').textContent =
+      `动画 ${animationSpeed} 倍 · 全桌同步 · 思考时间不变`;
+    const speedControl = element<HTMLSelectElement>('#room-animation-speed');
+    if (!speedSaving) speedControl.value = String(animationSpeed);
+    speedControl.disabled = speedSaving || !isOwner || !waiting;
     records.context(inMatch ? room.matchId : null, Boolean(room.engine.playerHistory));
     roomFailure.hidden = !room.matchFailure || inMatch;
     roomIdle.hidden = room.idleCloseAt == null || room.phase === 'closed';
@@ -742,7 +795,9 @@ export function showRoomPage(initial: RoomInfo, initialSession: SessionView): vo
       settingsDirty = false;
       settingsError = '';
       settingsSaved = false;
-      if (isOwner) element<HTMLDetailsElement>('#settings-panel').open = true;
+      if (isOwner)
+        element<HTMLDetailsElement>('#settings-panel').open =
+          window.matchMedia('(min-width: 761px)').matches;
       wasOwner = isOwner;
     }
     if (!waiting && settingsDirty) {
@@ -756,6 +811,32 @@ export function showRoomPage(initial: RoomInfo, initialSession: SessionView): vo
     const bots = room.players.filter((player) => player.kind === 'bot');
     const readyHumans = humans.filter((player) => player.online && player.ready).length;
     const empty = room.settings.playerCount - room.players.length;
+    const blockers: string[] = [];
+    if (me && !me.online) blockers.push('你已离线，正在重新连接');
+    else if (me && !me.ready) blockers.push('你尚未准备');
+    const others = humans.filter((player) => player.id !== me?.id);
+    const offline = others.filter((player) => !player.online).length;
+    const unready = others.filter((player) => player.online && !player.ready).length;
+    if (offline) blockers.push(`${offline} 位朋友离线，等待重新连接`);
+    if (unready) blockers.push(`${unready} 位朋友尚未准备`);
+    if (empty > 0) blockers.push(`还差 ${empty} 个席位 · 邀请朋友或用 AI 补位`);
+    if (!room.engine.ready) blockers.push('电脑规则服务未就绪，请保持电脑服务台开启');
+    if (settingsPending)
+      blockers.push(settingsError ? '房主设置保存失败，请重试' : '正在保存房主设置');
+    element('#start-check').hidden = !waiting;
+    element('#start-check').classList.toggle('all-ready', blockers.length === 0);
+    element('#start-check-title').textContent = blockers.length
+      ? `开局还差 ${blockers.length} 项`
+      : isOwner
+        ? '一切就绪，可以开局'
+        : '一切就绪，等待房主开局';
+    element('#start-blockers').replaceChildren(
+      ...blockers.map((text) => {
+        const item = document.createElement('li');
+        item.textContent = text;
+        return item;
+      }),
+    );
     const mode = findMode(room.settings.mode)!;
     const preset = GENERAL_PRESETS.find((entry) => entry.id === room.settings.generalPreset);
     renderRosterSource(element('#summary-roster-source'), room.settings.generalPreset);
@@ -799,18 +880,24 @@ export function showRoomPage(initial: RoomInfo, initialSession: SessionView): vo
       element<HTMLAnchorElement>('#other-room-link').href = `/join/${session.roomCode}`;
     element('#my-seat').hidden = !me;
     disable(element('#join-button'), empty <= 0 || !waiting);
+    element('#join-button').textContent = empty <= 0 ? '房间已满席' : '入座';
     if (me) {
       element('#my-nickname').textContent = me.nickname;
       element('#my-role').textContent = isOwner ? '你是房主，也参加这一局' : '已为你留好座位';
       const ready = element<HTMLButtonElement>('#ready-button');
       ready.textContent = me.ready ? '已准备 · 点击取消' : '我准备好了';
       ready.classList.toggle('is-ready', me.ready);
+      ready.classList.toggle('primary', !me.ready || !isOwner);
+      ready.classList.toggle('secondary', me.ready && isOwner);
+      element('#start-button').classList.toggle('primary', me.ready);
+      element('#start-button').classList.toggle('secondary', !me.ready);
       disable(ready, !me.online || !waiting || (isOwner && settingsPending));
     }
-    element('#owner-start').hidden = !isOwner;
+    element('#owner-start').hidden = !isOwner || !waiting;
     element('#owner-leave-hint').hidden = !isOwner;
     element('#bot-controls').hidden = !isOwner;
-    element('#settings-panel').hidden = !isOwner;
+    element('#settings-panel').hidden = !isOwner || !waiting;
+    element('#room-settings-link').hidden = !isOwner || !waiting;
     disable(element('#add-bot'), empty === 0 || !waiting || settingsPending);
     disable(element('#fill-bots'), empty === 0 || !waiting || settingsPending);
     disable(
@@ -865,6 +952,7 @@ export function showRoomPage(initial: RoomInfo, initialSession: SessionView): vo
       const player = room.players[index];
       const item = document.createElement('li');
       item.className = `seat ${player ? player.kind : 'empty'}`;
+      item.classList.toggle('self', player?.id === session.playerId);
       const avatar = document.createElement('span');
       avatar.className = 'avatar';
       avatar.textContent =
@@ -1071,6 +1159,9 @@ export function showRoomPage(initial: RoomInfo, initialSession: SessionView): vo
     generalPreset: element<HTMLSelectElement>('#general-preset')
       .value as RoomSettings['generalPreset'],
     allowGeneralSelection: element<HTMLInputElement>('#allow-general-selection').checked,
+    ...(room.settings.animationSpeed === undefined
+      ? {}
+      : { animationSpeed: room.settings.animationSpeed }),
     extensions: [],
   });
   function scheduleSettings(): void {
@@ -1133,6 +1224,21 @@ export function showRoomPage(initial: RoomInfo, initialSession: SessionView): vo
     markDirty();
   });
   element('#save-settings').addEventListener('click', () => void saveSettings());
+  element<HTMLSelectElement>('#room-animation-speed').addEventListener('change', async () => {
+    if (speedSaving || !owner() || room.phase !== 'waiting') return;
+    const control = element<HTMLSelectElement>('#room-animation-speed');
+    const animationSpeed = Number(control.value);
+    speedSaving = true;
+    refresh();
+    try {
+      renderRoom(await roomApi<RoomView>(`${roomPath}/animation-speed`, 'PUT', { animationSpeed }));
+    } catch (cause) {
+      message(cause instanceof Error ? cause.message : '动画速度保存失败，请重试。');
+    } finally {
+      speedSaving = false;
+      refresh();
+    }
+  });
   renderRoom(room);
   connectEvents();
 }

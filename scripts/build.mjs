@@ -23,6 +23,7 @@ await build({
   entryPoints: [path.join(root, 'apps/web/src/lobby-theme.css')],
   outfile: path.join(output, 'style.css'),
   bundle: true,
+  loader: { '.webp': 'dataurl' },
   target: ['chrome91', 'safari16.4'],
 });
 await build({

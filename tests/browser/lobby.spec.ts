@@ -7,6 +7,182 @@ import type { EngineAdapter, EngineEvent } from '../../packages/noname-adapter/s
 import { createPartyServer } from '../../apps/server/src/server.js';
 import { createPublicGateway } from '../../apps/server/src/public-gateway.js';
 
+for (const theme of ['camp', 'ink']) {
+  test(`经典大厅 ${theme}：首屏操作、全部开局阻塞和本地主题记忆`, async ({ browser }) => {
+    await withLobby(browser, async ({ party, base, page }) => {
+      const owner = await page();
+      await owner.setViewportSize({ width: 1366, height: 768 });
+      await owner.goto(base);
+      await owner.locator('#nickname').fill('同袍');
+      const mutations: string[] = [];
+      owner.on('request', (request) => {
+        if (['POST', 'PUT', 'DELETE'].includes(request.method())) mutations.push(request.url());
+      });
+      await owner.locator('#lobby-theme').selectOption(theme);
+      await expect(owner.locator('html')).toHaveAttribute('data-theme', theme);
+      await expect(owner.locator('#nickname')).toHaveValue('同袍');
+      expect(mutations).toEqual([]);
+      expect(
+        await owner.locator('.page-hero').evaluate((el) => el.getBoundingClientRect().height),
+      ).toBeLessThan(161);
+      expect(
+        await owner
+          .locator('#create-button')
+          .evaluate((el) => el.getBoundingClientRect().bottom < innerHeight),
+      ).toBe(true);
+      await owner.locator('#create-button').click();
+      await owner.waitForURL(/\/join\/([A-Z0-9]{6})$/);
+      const code = owner.url().split('/').at(-1)!;
+      await expect(owner.locator('html')).toHaveAttribute('data-theme', theme);
+      await expect(owner.locator('#start-blockers')).toContainText('你尚未准备');
+      await expect(owner.locator('#start-blockers')).toContainText('电脑规则服务未就绪');
+      await expect(owner.locator('#start-button')).toBeDisabled();
+      const room = party.lobby.get(code);
+      await owner.locator('#ready-button').click();
+      await expect.poll(() => room.snapshot().players[0]?.ready).toBe(true);
+      const revision = room.snapshot().revision;
+      await owner.locator('#lobby-theme').selectOption(theme === 'camp' ? 'ink' : 'camp');
+      expect(room.snapshot().revision).toBe(revision);
+      await expect(owner.locator('#start-blockers')).not.toContainText('你尚未准备');
+      await expect(owner.locator('#start-blockers')).toContainText('电脑规则服务未就绪');
+      for (const size of [
+        { width: 390, height: 844 },
+        { width: 1366, height: 768 },
+      ]) {
+        await owner.setViewportSize(size);
+        expect(await owner.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+          true,
+        );
+        expect(
+          await owner.locator('#ready-button').evaluate((el) => {
+            const r = el.getBoundingClientRect();
+            return r.top >= 0 && r.bottom <= innerHeight;
+          }),
+        ).toBe(true);
+        expect(
+          await owner
+            .locator('#start-check')
+            .evaluate((el) => el.getBoundingClientRect().bottom <= innerHeight),
+        ).toBe(true);
+      }
+    });
+  });
+}
+
+test('动画速度：默认2倍，房主与本机管理员1至10倍调整，准备和对局视图同步保留', async ({
+  browser,
+}) => {
+  const matches = new Map<string, string>();
+  const adapter: EngineAdapter = {
+    status: () => ({
+      id: 'noname',
+      ready: true,
+      animationSpeed: true,
+      message: '动画设置页面夹具',
+    }),
+    start: async (setup) => {
+      matches.set(setup.roomCode, `speed-${setup.roomCode}`);
+    },
+    matchId: (code) => matches.get(code) ?? null,
+  };
+  await withLobby(
+    browser,
+    async ({ party, base, page }) => {
+      const owner = await page(),
+        member = await page(),
+        operator = await page(true);
+      for (const phone of [owner, member])
+        await phone.route('**/engine/player/speed-*', (route) =>
+          route.fulfill({
+            contentType: 'text/html',
+            body: `<body>动画同步夹具<script>addEventListener('message', e => { if(e.origin === location.origin && e.source === parent && e.data.type === 'party-animation-speed') document.body.dataset.speed = e.data.animationSpeed; });</script></body>`,
+          }),
+        );
+      const code = await createRoom(owner, base, '调速房主');
+      await owner.reload();
+      await expect(owner.locator('#settings-panel')).not.toHaveAttribute('open', '');
+      await owner.locator('#room-settings-link').click();
+      await expect(owner.locator('#room-animation-speed')).toBeFocused();
+      await joinRoom(member, base, code, '朋友');
+      await expect(owner.locator('#room-animation-speed')).toHaveValue('2');
+      await expect(owner.locator('#room-animation-speed option')).toHaveCount(10);
+      await expect(member.locator('#room-speed-control')).toBeHidden();
+      await owner.locator('#fill-bots').click();
+      await owner.locator('#ready-button').click();
+      await member.locator('#ready-button').click();
+      const room = party.lobby.get(code);
+      await expect.poll(() => room.snapshot().players.every((player) => player.ready)).toBe(true);
+      await owner.locator('#room-animation-speed').selectOption('10');
+      await expect(member.locator('#summary-animation-speed')).toContainText('10 倍');
+      expect(room.snapshot().players.every((player) => player.ready)).toBe(true);
+      await owner.route('**/animation-speed', (route) =>
+        route.fulfill({
+          status: 503,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: { message: '测试保存失败' } }),
+        }),
+      );
+      await owner.locator('#room-animation-speed').selectOption('5');
+      await expect(owner.locator('#message')).toHaveText('测试保存失败');
+      await expect(owner.locator('#room-animation-speed')).toHaveValue('10');
+      await expect(owner.locator('#room-animation-speed')).toBeEnabled();
+      await owner.unroute('**/animation-speed');
+      await owner.locator('#start-button').click();
+      await expect(owner.locator('#match-animation-speed')).toHaveCount(0);
+      await expect(owner.locator('#room-speed-control')).toBeHidden();
+      await expect(owner.frameLocator('#game-frame').locator('body')).toHaveAttribute(
+        'data-speed',
+        '10',
+      );
+      const stale = await owner.request.put(`${base}/api/rooms/${code}/animation-speed`, {
+        data: { animationSpeed: 2 },
+        headers: { 'X-Party-Player': room.snapshot().ownerId! },
+      });
+      expect(stale.status()).toBe(409);
+      expect((await stale.json()).error.message).toContain('等待大厅');
+      expect(room.snapshot().settings.animationSpeed).toBe(10);
+      await operator.goto(base + '/server');
+      await expect(operator.locator('#console-animation-speed')).toHaveValue('10');
+      await operator.locator('#console-animation-speed').selectOption('1');
+      await expect(owner.frameLocator('#game-frame').locator('body')).toHaveAttribute(
+        'data-speed',
+        '1',
+      );
+      expect(room.snapshot().matchId).toBe(`speed-${code}`);
+      expect(room.snapshot().phase).toBe('playing');
+      const nativeFrame = owner.frames().find((frame) => frame.url().includes('/engine/player/'));
+      await expect(owner.locator('#match-more')).toHaveAccessibleName('更多');
+      await expect(owner.locator('#match-sound-menu')).toHaveAccessibleName('声音');
+      await owner.locator('#match-more').click();
+      await expect(owner.locator('#match-share')).toBeVisible();
+      await owner.locator('#match-theme').selectOption('ink');
+      await expect(owner.locator('html')).toHaveAttribute('data-theme', 'ink');
+      expect(owner.frames().find((frame) => frame.url().includes('/engine/player/'))).toBe(
+        nativeFrame,
+      );
+      await owner.locator('#match-theme').press('Escape');
+      await expect(owner.locator('#match-more-panel')).toBeHidden();
+      await expect(owner.locator('#match-more')).toBeFocused();
+      await owner.locator('#match-sound-menu').click();
+      await expect(owner.locator('#match-volume')).toBeVisible();
+      await owner.locator('#match-volume').press('Escape');
+      await expect(owner.locator('#match-sound-menu-panel')).toBeHidden();
+      await owner.locator('#match-more').click();
+      await owner.locator('#match-share').click();
+      await expect(owner.locator('#share-dialog')).toBeVisible();
+      await expect(owner.locator('#match-more-panel')).toBeHidden();
+      await owner.locator('#close-share').click();
+      await expect(owner.locator('#match-more')).toBeFocused();
+      expect(room.snapshot().matchId).toBe(`speed-${code}`);
+      const stamp = Date.now();
+      await owner.screenshot({ path: `.runtime/previews/animation-speed-owner-${stamp}.png` });
+      await operator.screenshot({ path: `.runtime/previews/animation-speed-console-${stamp}.png` });
+    },
+    false,
+    adapter,
+  );
+});
+
 for (const internet of [false, true]) {
   test(`${internet ? '公网轮询' : '局域网SSE'}：大家关页后无人房间自动回收，观战不续期，旧邀请失效`, async ({
     browser,
@@ -109,7 +285,7 @@ for (const internet of [false, true]) {
         await second.goto(`${entry}/join/${code}`);
         await expect(second.locator('#my-role')).toHaveText('已为你留好座位');
         await first.screenshot({
-          path: `.runtime/previews/room-ownership-${internet ? 'poll' : 'sse'}.png`,
+          path: `.runtime/previews/room-ownership-${internet ? 'poll' : 'sse'}-${Date.now()}.png`,
         });
       },
       internet,
@@ -157,6 +333,7 @@ test('结算可直接离房；普通成员回房后刷新仍在大厅，房主�
       await expect(member.locator('#game-frame')).toHaveCount(1);
       expect(party.lobby.get(code).snapshot().phase).toBe('playing');
       for (const listener of listeners) listener({ type: 'ended', roomCode: code });
+      await leaving.locator('#match-more').click();
       await leaving.locator('#match-leave').click();
       await expect(leaving.locator('#create-panel')).toBeVisible();
       expect(party.lobby.get(code).snapshot().phase).toBe('finished');
@@ -166,6 +343,7 @@ test('结算可直接离房；普通成员回房后刷新仍在大厅，房主�
       await expect(member.locator('#waiting-return')).toBeVisible();
       await expect(member.locator('#game-frame')).toHaveCount(0);
       await expect(member.locator('#leave-button')).toBeEnabled();
+      await owner.locator('#match-more').click();
       await owner.locator('#match-leave').click();
       await expect(owner.locator('#create-panel')).toBeVisible();
       await expect(member.locator('#my-role')).toHaveText('你是房主，也参加这一局');
@@ -176,6 +354,7 @@ test('结算可直接离房；普通成员回房后刷新仍在大厅，房主�
       await expect(member.locator('#game-frame')).toHaveCount(1);
       expect(sequence).toBe(2);
       for (const listener of listeners) listener({ type: 'ended', roomCode: code });
+      await member.locator('#match-more').click();
       await member.locator('#match-leave').click();
       await expect(member.locator('#create-panel')).toBeVisible();
       expect(party.lobby.list()).toHaveLength(0);
@@ -471,6 +650,11 @@ async function createRoom(page: Page, base: string, nickname: string): Promise<s
   await page.getByLabel('怎么称呼你').fill(nickname);
   await page.getByRole('button', { name: '创建房间并入座' }).click();
   await expect(page.locator('#my-role')).toHaveText('你是房主，也参加这一局');
+  if (
+    !(await page.locator('#settings-panel').evaluate((panel) => (panel as HTMLDetailsElement).open))
+  )
+    await page.locator('#room-settings-link').click();
+  await page.locator('#room-rules-summary > summary').click();
   return page.url().split('/').at(-1)!;
 }
 
@@ -499,6 +683,7 @@ async function joinRoom(page: Page, base: string, code: string, nickname: string
   await page.getByLabel('怎么称呼你').fill(nickname);
   await page.getByRole('button', { name: '入座', exact: true }).click();
   await expect(page.getByRole('button', { name: '我准备好了' })).toBeEnabled();
+  await page.locator('#room-rules-summary > summary').click();
 }
 
 test('房主设置自动合并与串行保存，晚响应保留新草稿，失败可重试并重新准备', async ({ browser }) => {
@@ -833,6 +1018,7 @@ test('手机工具条主动托管与恢复由牌桌确认，公开身份与最�
         await expect(phone.locator('#match-connection')).toBeHidden();
         await expect(phone.locator('#match-auto')).toBeEnabled();
       }
+      await phone.locator('#match-more').click();
       await phone.locator('#match-auto').click();
       await expect(phone.locator('#match-auto')).toHaveText('恢复手动操作');
       await expect(phone.locator('#match-auto')).toHaveAttribute('aria-pressed', 'true');
@@ -1019,6 +1205,7 @@ test('电脑只展示主页码，手机建房参赛，任意成员展示直达�
     await expect
       .poll(() => room.snapshot().players.filter((player) => player.ready).length)
       .toBe(4);
+    await owner.locator('#room-settings-link').click();
     await owner.getByLabel('武将范围').selectOption('advanced');
     await waitForSettings(owner);
     await expect(phones[1]!.locator('#summary-details')).toHaveText('4 席 · 经典进阶96将');
@@ -1033,10 +1220,16 @@ test('电脑只展示主页码，手机建房参赛，任意成员展示直达�
     await mkdir(fileURLToPath(new URL('../../.runtime/previews/', import.meta.url)), {
       recursive: true,
     });
-    await computer.screenshot({ path: '.runtime/previews/server.png', fullPage: true });
-    await owner.screenshot({ path: '.runtime/previews/owner.png', fullPage: true });
+    await computer.screenshot({
+      path: `.runtime/previews/server-${Date.now()}.png`,
+      fullPage: true,
+    });
+    await owner.screenshot({ path: `.runtime/previews/owner-${Date.now()}.png`, fullPage: true });
     await phones[1]!.getByRole('button', { name: '展示房间二维码' }).click();
-    await phones[1]!.screenshot({ path: '.runtime/previews/member-qr.png', fullPage: true });
+    await phones[1]!.screenshot({
+      path: `.runtime/previews/member-qr-${Date.now()}.png`,
+      fullPage: true,
+    });
   });
 });
 
@@ -1087,11 +1280,13 @@ test('模拟投降界面：先确认、真人表态、冷却和断线锁定，�
         await phone.locator('#fill-bots').click();
         await phone.locator('#ready-button').click();
         await phone.locator('#start-button').click();
+        await phone.locator('#match-more').click();
         await expect(phone.locator('#match-surrender')).toBeVisible();
         await expect(phone.locator('#match-surrender')).toHaveText(
           kind === 'end' ? '提前结束' : '投降',
         );
         await phone.locator('#match-surrender').click();
+        await expect(phone.locator('#surrender-dialog')).toBeVisible();
         await expect(phone.locator('#surrender-detail')).toContainText(
           kind === 'end' ? '含已阵亡玩家' : '对方获胜',
         );
@@ -1108,6 +1303,7 @@ test('模拟投降界面：先确认、真人表态、冷却和断线锁定，�
             .locator('body')
             .evaluate(() => (window as any).commands.length),
         ).toBe(0);
+        await phone.locator('#match-more').click();
         await phone.locator('#match-surrender').click();
         await phone.locator('#surrender-confirm').click();
         await expect(phone.locator('#surrender-voters')).toContainText('<b>乔</b> · 已同意');
@@ -1115,6 +1311,7 @@ test('模拟投降界面：先确认、真人表态、冷却和断线锁定，�
         await expect(phone.locator('#surrender-confirm')).toBeHidden();
         await phone.locator('#surrender-reject').click();
         await expect(phone.locator('#surrender-dialog')).not.toBeVisible();
+        await phone.locator('#match-more').click();
         await expect(phone.locator('#surrender-notice')).toContainText('本局继续');
         const commands = await phone
           .frameLocator('#game-frame')
@@ -1271,6 +1468,7 @@ test('模拟牌桌更新中断：结束后同步最终画面，手动恢复保�
       disconnect();
       await phone.waitForTimeout(2200);
       expect(loads).toBe(2);
+      await phone.locator('#match-more').click();
       await phone.getByRole('button', { name: '恢复牌桌', exact: true }).click();
       await expect.poll(() => loads).toBe(3);
       expect(party.lobby.get(code).snapshot().phase).toBe('finished');
@@ -1369,7 +1567,10 @@ test('电脑控制台管理两桌，安全显示昵称、移除等待席位和�
     await expect(owner.locator('#connection')).toHaveText('房间已关闭');
     expect(party.lobby.get(otherCode).snapshot().players.length).toBe(1);
     await mkdir('.runtime/previews', { recursive: true });
-    await computer.screenshot({ path: '.runtime/previews/service-console.png', fullPage: true });
+    await computer.screenshot({
+      path: `.runtime/previews/service-console-${Date.now()}.png`,
+      fullPage: true,
+    });
   });
 });
 
@@ -1585,7 +1786,10 @@ test('四个局域网成员与一个公网成员同桌，切断公网后局域�
       for (let index = 0; index < 3; index++) await computer.locator('#refresh-address').click();
       expect(qrRequests, '控制台状态刷新不重复下载相同二维码').toBe(2);
       await mkdir('.runtime/previews', { recursive: true });
-      await computer.screenshot({ path: '.runtime/previews/hybrid-console.png', fullPage: true });
+      await computer.screenshot({
+        path: `.runtime/previews/hybrid-console-${Date.now()}.png`,
+        fullPage: true,
+      });
     },
     true,
   );
@@ -1604,7 +1808,7 @@ test('手机房主为 5/8 席补 AI、修改玩法裁掉多余 AI，真人准备
       await phone.getByRole('button', { name: '我准备好了' }).click();
     const waiting = await page();
     await waiting.goto(`${base}/join/${code}`);
-    await expect(waiting.getByRole('button', { name: '入座', exact: true })).toBeDisabled();
+    await expect(waiting.getByRole('button', { name: '房间已满席', exact: true })).toBeDisabled();
     await owner.getByLabel('总席位（含 AI）').selectOption('8');
     await waitForSettings(owner);
     await expect(friend.getByRole('button', { name: '我准备好了' })).toBeVisible();
@@ -1703,6 +1907,7 @@ test('房主开放大厅点将，成员搜索和保留首候选，争抢、取�
     await member.locator('[data-general="zhaoyun"]').click();
     await expect(member.locator('#guide-selection-status')).toContainText('已点将：赵云');
     await owner.getByRole('button', { name: '关闭武将图鉴' }).click();
+    await owner.locator('#room-settings-link').click();
     await owner.getByLabel('武将范围').selectOption('advanced');
     await waitForSettings(owner);
     await expect(member.locator('#general-pick-state')).toContainText('未点将');
@@ -1718,7 +1923,9 @@ test('房主开放大厅点将，成员搜索和保留首候选，争抢、取�
         () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
       ),
     ).toBe(true);
-    await member.screenshot({ path: '.runtime/previews/lobby-general-selection.png' });
+    await member.screenshot({
+      path: `.runtime/previews/lobby-general-selection-${Date.now()}.png`,
+    });
     expect(JSON.stringify(party.lobby.get(code).snapshot())).not.toContain('caoang');
     await owner.getByLabel('允许点将').uncheck();
     await waitForSettings(owner);
@@ -1775,11 +1982,11 @@ test('局外图鉴可查看两档技能、筛选和搜索，保持成员在线�
         .players.every((player) => player.online),
     ).toBe(true);
     expect(party.lobby.get(code).snapshot().settings.generalPreset).toBe('advanced');
-    await member.screenshot({ path: '.runtime/previews/general-guide-search.png' });
+    await member.screenshot({ path: `.runtime/previews/general-guide-search-${Date.now()}.png` });
     await member.getByLabel('查找武将或技能').fill('界徐庶');
     await member.locator('.guide-entry summary').click();
     await expect(member.locator('.guide-entry dl')).toContainText('荐言（关联技能）');
-    await member.screenshot({ path: '.runtime/previews/general-guide.png' });
+    await member.screenshot({ path: `.runtime/previews/general-guide-${Date.now()}.png` });
     await member.getByRole('button', { name: '关闭武将图鉴' }).click();
     await expect(member.getByRole('button', { name: '我准备好了' })).toBeEnabled();
   });

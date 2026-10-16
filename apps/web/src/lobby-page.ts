@@ -9,7 +9,7 @@ import {
 import { api, app, element, frame, perform, watchEvents } from './ui.js';
 import { bindGeneralGuide, guideButton } from './general-guide.js';
 import { createAssetPreloader } from './engine-preloader.js';
-import { arrowIcon, heroArtwork, modeIcon } from './lobby-art.js';
+import { arrowIcon, modeIcon } from './lobby-art.js';
 
 const joinable = (room: RoomSummary) =>
   room.phase === 'waiting' && room.humanCount + room.botCount < room.playerCount;
@@ -75,9 +75,9 @@ function createRoomList() {
 export function showHomePage(info: ServerInfo, session: SessionView): void {
   frame(
     'player-layout home-layout',
-    '朋友的聚会大厅',
-    '一桌朋友，<br /><span>一场好戏。</span>',
-    '把三国的风云，带到朋友之间。<br class="desktop-break" />无需安装，填个昵称就能入席。',
+    '聚会大厅',
+    '群英聚首，<span>即刻开局。</span>',
+    '开一张牌桌，或加入朋友的房间。',
     `
     <div class="home-main" id="lobby-actions">
       <section id="current-room" class="panel current-room" hidden><p class="section-index">继续这一局</p><h2>你的座位还在。</h2><p class="hint">朋友和牌桌都在原房间，随时可以回来。</p><a id="return-room" class="button primary full-width" href="/">返回我的房间${arrowIcon}</a></section>
@@ -85,7 +85,6 @@ export function showHomePage(info: ServerInfo, session: SessionView): void {
       <section class="panel rooms-panel" id="friends-rooms"><div class="panel-heading"><div><p class="section-index">好戏正在发生</p><h2>朋友的房间</h2></div><span id="room-total" class="room-total">0 间</span></div><div class="room-filters" aria-label="筛选房间"><button type="button" data-room-filter="all" aria-pressed="true" aria-controls="room-list">全部房间</button><button type="button" data-room-filter="joinable" aria-pressed="false" aria-controls="room-list">可加入</button><span class="live-note">实时更新</span></div><ul id="room-list" class="room-list"></ul><div id="empty-rooms" class="empty-rooms"><span class="empty-symbol" aria-hidden="true">${modeIcon('identity')}</span><h3 id="empty-room-title">第一桌，等你来开。</h3><p id="empty-room-hint">填个昵称，邀上朋友。人少也可以用 AI 补位。</p></div></section>
     </div>
     <section class="lobby-discover" id="lobby-guide"><div class="discover-heading"><p class="section-index">随人数，选好戏</p><h2>各有玩法，同样尽兴。</h2><p class="hint">两个人也能开场，八个人正好热闹。</p></div><ul class="lobby-modes" aria-label="支持的玩法">${MODES.map((mode) => `<li><span class="lobby-mode-icon">${modeIcon(mode.id)}</span><strong>${mode.name}</strong><span>${mode.minPlayers === mode.maxPlayers ? mode.minPlayers : '5–8'} 人</span></li>`).join('')}</ul><div class="guide-panel"><div><h3>识英雄，知招式。</h3><p class="hint">标准27将、经典进阶96将与官方活动将池，上桌前先看看技能。</p></div>${guideButton}</div><p id="engine-preload" class="hint" role="status" hidden></p></section>`,
-    heroArtwork,
   );
   bindGeneralGuide();
   createAssetPreloader(

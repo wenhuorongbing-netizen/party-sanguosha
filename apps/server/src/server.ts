@@ -242,9 +242,10 @@ export function createPartyServer(options: ServerOptions) {
         json(response, 200, page);
         return;
       }
-      const command = /^\/api\/console\/rooms\/([A-F0-9]{6})(?:\/(reset|players\/[\w-]+))?$/.exec(
-        url.pathname,
-      );
+      const command =
+        /^\/api\/console\/rooms\/([A-F0-9]{6})(?:\/(reset|animation-speed|players\/[\w-]+))?$/.exec(
+          url.pathname,
+        );
       if (command) {
         const room = lobby.get(command[1]!);
         // Refuse a stale operator click after the room has changed phase/seat.
@@ -252,6 +253,8 @@ export function createPartyServer(options: ServerOptions) {
         if (!Number.isSafeInteger(revision) || revision !== room.snapshot().revision)
           throw new AppError(409, 'ROOM_CHANGED', '房间刚刚有变化，请查看更新后再操作。');
         if (request.method === 'DELETE' && !command[2]) room.consoleClose();
+        else if (request.method === 'PUT' && command[2] === 'animation-speed')
+          room.consoleSetAnimationSpeed((await readBody(request)).animationSpeed);
         else if (request.method === 'POST' && command[2] === 'reset') room.consoleReset();
         else if (request.method === 'DELETE' && command[2]?.startsWith('players/'))
           room.consoleRemovePlayer(command[2].slice(8));
@@ -340,7 +343,7 @@ export function createPartyServer(options: ServerOptions) {
     }
 
     const roomRoute =
-      /^\/api\/rooms\/([A-F0-9]{6})(?:\/(players(?:\/[\w-]+)?|me(?:\/(?:ready|general))?|owner(?:\/claim)?|start|rematch|bots|events))?$/.exec(
+      /^\/api\/rooms\/([A-F0-9]{6})(?:\/(players(?:\/[\w-]+)?|me(?:\/(?:ready|general))?|owner(?:\/claim)?|start|rematch|bots|events|animation-speed))?$/.exec(
         url.pathname,
       );
     if (roomRoute) {
@@ -351,6 +354,7 @@ export function createPartyServer(options: ServerOptions) {
         'POST players',
         'PUT me/ready',
         'PUT me/general',
+        'PUT animation-speed',
         'PUT ',
         'POST bots',
         'PUT owner',
@@ -394,6 +398,10 @@ export function createPartyServer(options: ServerOptions) {
           return;
         case 'PUT ':
           room.updateSettings(body, playerToken);
+          json(response, 200, room.snapshot());
+          return;
+        case 'PUT animation-speed':
+          room.setAnimationSpeed(body!.animationSpeed, playerToken);
           json(response, 200, room.snapshot());
           return;
         case 'POST start':
